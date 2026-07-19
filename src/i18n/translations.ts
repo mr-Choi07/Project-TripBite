@@ -129,6 +129,7 @@ const dict = {
     categoryAttraction: '관광지',
     categoryFestival: '축제·행사',
     categoryStay: '숙박',
+    categoryShopping: '쇼핑',
     categoryRestaurant: '맛집',
 
     stampTitle: '스탬프 · 쿠폰',
@@ -274,6 +275,7 @@ const dict = {
     categoryAttraction: 'Attraction',
     categoryFestival: 'Festival',
     categoryStay: 'Stay',
+    categoryShopping: 'Shopping',
     categoryRestaurant: 'Restaurant',
 
     stampTitle: 'Stamps & Coupon',
@@ -419,6 +421,7 @@ const dict = {
     categoryAttraction: '観光地',
     categoryFestival: '祭り・行事',
     categoryStay: '宿泊',
+    categoryShopping: 'ショッピング',
     categoryRestaurant: 'グルメ',
 
     stampTitle: 'スタンプ・クーポン',
@@ -564,6 +567,7 @@ const dict = {
     categoryAttraction: '景点',
     categoryFestival: '节庆活动',
     categoryStay: '住宿',
+    categoryShopping: '购物',
     categoryRestaurant: '美食',
 
     stampTitle: '印章与优惠券',

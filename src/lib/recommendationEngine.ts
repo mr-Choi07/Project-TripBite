@@ -207,6 +207,7 @@ function matchReasonText(lang: Lang, item: MenuItem, input: MenuFilterInput, not
 const WALK_PACE_M_PER_MIN = 100
 const BUDGET_TOLERANCE_MIN: Record<CourseDuration, number> = { 30: 5, 60: 10, 120: 15 }
 const INTEREST_TOLERANCE_MIN = 10
+const CATEGORY_CAP_PER_COURSE = 2
 const COURSE_EXCLUDED_CATEGORIES = ['stay'] as const
 
 const INTEREST_LABEL: Record<string, LocalizedText> = {
@@ -221,6 +222,8 @@ const INTEREST_LABEL: Record<string, LocalizedText> = {
   축제: { ko: '축제', en: 'festivals', ja: '祭り', zh: '节庆' },
   로컬푸드: { ko: '로컬 푸드', en: 'local food', ja: 'ローカルフード', zh: '本地美食' },
   해산물: { ko: '해산물', en: 'seafood', ja: '海鮮', zh: '海鲜' },
+  레트로: { ko: '레트로', en: 'retro spots', ja: 'レトロ', zh: '复古怀旧' },
+  기차: { ko: '기차역', en: 'train station', ja: '駅', zh: '火车站' },
 }
 
 export const INTEREST_OPTIONS = Object.keys(INTEREST_LABEL)
@@ -288,16 +291,23 @@ export function buildCourse(
   const stops: CourseStop[] = []
   let elapsedMinutes = 0
   let prevDistanceM = 0
+  const categoryCounts: Partial<Record<TourSpot['category'], number>> = {}
 
   for (const spot of candidates) {
+    // Cap how many stops of the same category a course can take, so a
+    // cluster of nearby restaurants can't crowd out every other category —
+    // a farther attraction/shop still gets a shot at the remaining budget.
+    if ((categoryCounts[spot.category] ?? 0) >= CATEGORY_CAP_PER_COURSE) continue
+
     const travelDistance = Math.max(0, spot.distanceM - prevDistanceM)
     const travelMinutes = Math.round(travelDistance / WALK_PACE_M_PER_MIN)
     const projected = elapsedMinutes + travelMinutes + spot.dwellMinutes
 
     // A spot matching the traveler's selected interests earns extra budget
     // leniency, so toggling interest chips can actually change which stops
-    // make the cut — not just decorate the reason tags.
-    const matchesInterest = spot.interestTags.some((tag) => interests.includes(tag))
+    // make the cut — not just decorate the reason tags. The 30-minute tier
+    // stays strict so it remains a meaningfully smaller option than 60/120.
+    const matchesInterest = duration !== 30 && spot.interestTags.some((tag) => interests.includes(tag))
     const effectiveBudget = matchesInterest ? budget + INTEREST_TOLERANCE_MIN : budget
 
     if (projected > effectiveBudget) {
@@ -317,6 +327,7 @@ export function buildCourse(
       reasons: buildStopReasons(spot, travelMinutes, interests),
     })
 
+    categoryCounts[spot.category] = (categoryCounts[spot.category] ?? 0) + 1
     elapsedMinutes = projected
     prevDistanceM = spot.distanceM
   }

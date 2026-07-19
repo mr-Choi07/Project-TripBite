@@ -15,7 +15,20 @@ const CONTENT_TYPE_BY_CATEGORY: Record<TourCategory, TourContentTypeId> = {
   attraction: '12',
   festival: '15',
   stay: '32',
+  shopping: '38',
   restaurant: '39',
+}
+
+/** TourAPI doesn't return per-item interest tags, so live spots default to
+ * their category's typical interests. This is what lets the interest chips
+ * (바다/쇼핑/전통시장/...) actually influence which live spots get picked,
+ * instead of only ever working against the mock dataset. */
+const DEFAULT_INTEREST_TAGS_BY_CATEGORY: Record<TourCategory, string[]> = {
+  attraction: ['자연', '전망', '산책', '사진'],
+  festival: ['축제', '로컬푸드'],
+  stay: ['숙박'],
+  shopping: ['쇼핑', '전통시장'],
+  restaurant: ['로컬맛집'],
 }
 
 interface FetchNearbyParams {
@@ -94,7 +107,7 @@ async function fetchLiveCategory(
       tel: String(raw.tel ?? ''),
       distanceM: Math.round(haversineM(lat, lng, itemLat, itemLng)),
       crowd: 'medium',
-      interestTags: [],
+      interestTags: DEFAULT_INTEREST_TAGS_BY_CATEGORY[category],
       dwellMinutes: category === 'festival' ? 30 : category === 'restaurant' ? 25 : 20,
     }
   })
@@ -110,7 +123,7 @@ export async function fetchNearbySpots({
   lat,
   lng,
   radiusM = 3000,
-  categories = ['attraction', 'festival', 'stay', 'restaurant'],
+  categories = ['attraction', 'festival', 'stay', 'shopping', 'restaurant'],
 }: FetchNearbyParams): Promise<TourApiResult> {
   const apiKey = getApiKey()
 

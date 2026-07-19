@@ -1,8 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { onAuthStateChanged, type User } from 'firebase/auth'
 import type { CartLine, Lang, MenuItem, QrPayload, WeatherContext } from '../types'
 import dict from '../i18n/translations'
 import { trackEvent } from '../lib/analyticsStore'
 import { MENU } from '../data/menu'
+import { auth } from '../lib/firebase'
+import { isOwnerUser } from '../lib/ownerAuth'
 
 const LANG_KEY = 'tripbite_lang'
 const SESSION_KEY = 'tripbite_session'
@@ -84,6 +87,10 @@ interface AppContextValue {
   cartCount: number
   toast: string | null
   showToast: (message: string) => void
+  authReady: boolean
+  firebaseUser: User | null
+  uid: string | null
+  isOwner: boolean
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -95,10 +102,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [cart, setCart] = useState<CartLine[]>(readCart)
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null)
+  const [authReady, setAuthReady] = useState(false)
 
   useEffect(() => {
     writeCart(cart)
   }, [cart])
+
+  useEffect(() => {
+    // lib/firebase.ts owns triggering the anonymous sign-in itself (see
+    // `authReady`); this listener just mirrors the resulting auth state.
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) return
+      setFirebaseUser(user)
+      setAuthReady(true)
+    })
+    return unsubscribe
+  }, [])
 
   const showToast = useCallback((message: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current)
@@ -109,8 +129,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setLang = useCallback((next: Lang, opts?: { silent?: boolean }) => {
     setLangState(next)
     localStorage.setItem(LANG_KEY, next)
-    if (!opts?.silent) trackEvent('language_selected', { lang: next })
-  }, [])
+    if (!opts?.silent) trackEvent(session.storeId, 'language_selected', { lang: next })
+  }, [session.storeId])
 
   const enterWithQr = useCallback((payload: QrPayload) => {
     const next: SessionState = {
@@ -122,15 +142,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSession(next)
     localStorage.setItem(SESSION_KEY, JSON.stringify(next))
     setLang(payload.lang, { silent: true })
-    trackEvent('qr_scan', { storeId: payload.storeId, campaignId: payload.campaignId })
-    trackEvent('language_selected', { lang: payload.lang })
+    trackEvent(payload.storeId, 'qr_scan')
+    trackEvent(payload.storeId, 'language_selected', { lang: payload.lang })
   }, [setLang])
 
   const enterAsDemo = useCallback(() => {
     const next: SessionState = { ...DEFAULT_SESSION, entered: true, entryMethod: 'demo' }
     setSession(next)
     localStorage.setItem(SESSION_KEY, JSON.stringify(next))
-    trackEvent('qr_scan', { storeId: next.storeId, campaignId: next.campaignId, demo: true })
+    trackEvent(next.storeId, 'qr_scan')
   }, [])
 
   const addToCart = useCallback((item: MenuItem) => {
@@ -177,6 +197,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cartCount,
     toast,
     showToast,
+    authReady,
+    firebaseUser,
+    uid: firebaseUser?.uid ?? null,
+    isOwner: isOwnerUser(firebaseUser),
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

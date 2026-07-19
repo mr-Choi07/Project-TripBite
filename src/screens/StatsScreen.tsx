@@ -1,11 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { QrCode, MousePointerClick, Stamp as StampIcon, Ticket, ArrowLeft } from 'lucide-react'
+import { QrCode, MousePointerClick, Stamp as StampIcon, Ticket, LogOut, Compass } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import AppShell from '../components/layout/AppShell'
 import { getStats } from '../lib/analyticsStore'
+import { ownerSignOut } from '../lib/ownerAuth'
+import { SUNRISE_BOWL } from '../data/place'
 import { LANG_LABEL } from '../i18n'
-import type { CourseDuration, Lang } from '../types'
+import type { AnalyticsCounters, CourseDuration, Lang } from '../types'
 
 const LANG_COLOR: Record<Lang, string> = {
   ko: '#1baf7a',
@@ -18,17 +20,45 @@ const DURATIONS: CourseDuration[] = [30, 60, 120]
 const DURATION_LABEL: Record<CourseDuration, string> = { 30: '30min', 60: '1hr', 120: '2hr' }
 
 export default function StatsScreen() {
-  const { t } = useApp()
+  const { t, firebaseUser } = useApp()
   const navigate = useNavigate()
-  const [{ counters, trend }] = useState(() => getStats())
+  const [loading, setLoading] = useState(true)
+  const [counters, setCounters] = useState<AnalyticsCounters | null>(null)
+  const [trend, setTrend] = useState<number[]>([])
 
-  const maxTrend = Math.max(...trend, 1)
+  useEffect(() => {
+    getStats(SUNRISE_BOWL.storeId).then((res) => {
+      setCounters(res.counters)
+      setTrend(res.trend)
+      setLoading(false)
+    })
+  }, [])
+
   const langTotal = useMemo(
-    () => (Object.values(counters.languageCounts) as number[]).reduce((a, b) => a + b, 0) || 1,
+    () => (counters ? (Object.values(counters.languageCounts) as number[]).reduce((a, b) => a + b, 0) : 0) || 1,
     [counters],
   )
-  const maxCoursePop = Math.max(...(Object.values(counters.coursePopularity) as number[]), 1)
-  const topCourse = (Object.entries(counters.coursePopularity) as [string, number][]).sort((a, b) => b[1] - a[1])[0]
+  const maxTrend = Math.max(...trend, 1)
+  const maxCoursePop = Math.max(...(counters ? (Object.values(counters.coursePopularity) as number[]) : [0]), 1)
+  const topCourse = counters
+    ? (Object.entries(counters.coursePopularity) as [string, number][]).sort((a, b) => b[1] - a[1])[0]
+    : undefined
+
+  async function handleLogout() {
+    await ownerSignOut()
+    navigate('/owner/login')
+  }
+
+  if (loading || !counters) {
+    return (
+      <AppShell title={t('statsTitle')} showBack showNav={false}>
+        <div className="flex flex-col items-center gap-2 py-24 text-tb-ink-soft">
+          <StampIcon size={22} className="animate-pulse text-tb-teal-500" />
+          <p className="text-xs">불러오는 중...</p>
+        </div>
+      </AppShell>
+    )
+  }
 
   const tiles = [
     { label: t('statsQrScans'), value: counters.qrScans, icon: QrCode },
@@ -40,7 +70,10 @@ export default function StatsScreen() {
   return (
     <AppShell title={t('statsTitle')} showBack showNav={false}>
       <div className="px-4 pt-3 pb-8">
-        <p className="text-xs text-tb-ink-soft">{t('statsSubtitle')}</p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-tb-ink-soft">{t('statsSubtitle')}</p>
+          {firebaseUser?.email && <span className="text-[10px] font-medium text-tb-ink-soft/70">{firebaseUser.email}</span>}
+        </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2.5">
           {tiles.map(({ label, value, icon: Icon }) => (
@@ -120,14 +153,24 @@ export default function StatsScreen() {
 
         <p className="mt-4 text-center text-[10px] text-tb-ink-soft/70">{t('statsFootnote')}</p>
 
-        <button
-          type="button"
-          onClick={() => navigate('/landing')}
-          className="mt-5 flex w-full items-center justify-center gap-1.5 rounded-2xl border border-tb-line py-3 text-sm font-semibold text-tb-ink-soft"
-        >
-          <ArrowLeft size={15} />
-          {t('statsBack')}
-        </button>
+        <div className="mt-5 flex gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl border border-tb-line py-3 text-sm font-semibold text-tb-ink-soft"
+          >
+            <Compass size={15} />
+            관광객 화면 보기
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl border border-tb-coral-200 bg-tb-coral-50 py-3 text-sm font-semibold text-tb-coral-600"
+          >
+            <LogOut size={15} />
+            로그아웃
+          </button>
+        </div>
       </div>
     </AppShell>
   )

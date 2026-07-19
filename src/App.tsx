@@ -8,11 +8,19 @@ import AIRecommendScreen from './screens/AIRecommendScreen'
 import CourseScreen from './screens/CourseScreen'
 import StampScreen from './screens/StampScreen'
 import StatsScreen from './screens/StatsScreen'
+import OwnerLoginScreen from './screens/OwnerLoginScreen'
 import ToastHost from './components/ui/ToastHost'
 
 function RequireSession({ children }: { children: ReactNode }) {
   const { session } = useApp()
   if (!session.entered) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
+function RequireOwner({ children }: { children: ReactNode }) {
+  const { authReady, isOwner } = useApp()
+  if (!authReady) return null
+  if (!isOwner) return <Navigate to="/owner/login" replace />
   return <>{children}</>
 }
 
@@ -60,12 +68,13 @@ function AppRoutes() {
           </RequireSession>
         }
       />
+      <Route path="/owner/login" element={<OwnerLoginScreen />} />
       <Route
         path="/stats"
         element={
-          <RequireSession>
+          <RequireOwner>
             <StatsScreen />
-          </RequireSession>
+          </RequireOwner>
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -4,6 +4,7 @@ import { MapPin, Clock, Footprints, Check, Sparkles, Bed, ArrowRight } from 'luc
 import { useApp } from '../context/AppContext'
 import AppShell from '../components/layout/AppShell'
 import Tag from '../components/ui/Tag'
+import CourseMap from '../components/course/CourseMap'
 import { SUNRISE_BOWL } from '../data/place'
 import { pickLocalized } from '../i18n'
 import { fetchNearbySpots } from '../lib/tourApi'
@@ -22,19 +23,20 @@ const CATEGORY_KEY = {
   attraction: 'categoryAttraction',
   festival: 'categoryFestival',
   stay: 'categoryStay',
+  shopping: 'categoryShopping',
   restaurant: 'categoryRestaurant',
 } as const
 
 export default function CourseScreen() {
-  const { t, lang, weather, showToast } = useApp()
+  const { t, lang, weather, showToast, session, uid } = useApp()
   const navigate = useNavigate()
 
   const [spots, setSpots] = useState<TourSpot[]>([])
   const [source, setSource] = useState<TourApiSource>('mock')
   const [loading, setLoading] = useState(true)
   const [duration, setDuration] = useState<CourseDuration>(60)
-  const [interests, setInterests] = useState<Set<string>>(new Set(['바다', '전통시장']))
-  const [visited, setVisited] = useState<Set<string>>(() => new Set(getStamps().map((s) => s.spotId)))
+  const [interests, setInterests] = useState<Set<string>>(new Set(['바다', '레트로']))
+  const [visited, setVisited] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     let active = true
@@ -50,12 +52,17 @@ export default function CourseScreen() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!uid) return
+    getStamps(session.storeId, uid).then((stamps) => setVisited(new Set(stamps.map((s) => s.spotId))))
+  }, [session.storeId, uid])
+
   const course: Course = useMemo(() => buildCourse(duration, spots, Array.from(interests)), [duration, spots, interests])
   const bonusStay = useMemo(() => pickBonusStay(spots, course), [spots, course])
 
   function handleSelectDuration(d: CourseDuration) {
     setDuration(d)
-    trackEvent('course_click', { duration: d })
+    trackEvent(session.storeId, 'course_click', { duration: d })
   }
 
   function toggleInterest(tag: string) {
@@ -67,8 +74,9 @@ export default function CourseScreen() {
     })
   }
 
-  function handleStamp(spot: TourSpot) {
-    const res = addStamp(spot)
+  async function handleStamp(spot: TourSpot) {
+    if (!uid) return
+    const res = await addStamp(session.storeId, uid, spot)
     setVisited(new Set(res.stamps.map((s) => s.spotId)))
     if (res.isNew) {
       const justEarnedCoupon = res.stamps.length === getStampGoal() && Boolean(res.coupon)
@@ -143,6 +151,17 @@ export default function CourseScreen() {
                 <p className="text-[10px] font-medium text-tb-ink-soft">{t('courseTotalDistance')}</p>
                 <p className="text-sm font-bold text-tb-ink">{formatCourseDistance(course.totalDistanceM)}</p>
               </div>
+            </div>
+
+            <div className="mt-4">
+              <CourseMap
+                origin={{ lat: SUNRISE_BOWL.lat, lng: SUNRISE_BOWL.lng, label: pickLocalized(SUNRISE_BOWL.name, lang) }}
+                stops={course.stops.map((stop) => ({
+                  lat: stop.spot.lat,
+                  lng: stop.spot.lng,
+                  label: pickLocalized(stop.spot.title, lang),
+                }))}
+              />
             </div>
 
             <ol className="relative mt-6 space-y-6 border-l-2 border-dashed border-tb-line pl-5">

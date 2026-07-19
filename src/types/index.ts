@@ -60,9 +60,9 @@ export interface TourApiItem {
   dist: number
 }
 
-export type TourContentTypeId = '12' | '15' | '32' | '39'
+export type TourContentTypeId = '12' | '15' | '32' | '38' | '39'
 
-export type TourCategory = 'attraction' | 'festival' | 'stay' | 'restaurant'
+export type TourCategory = 'attraction' | 'festival' | 'stay' | 'shopping' | 'restaurant'
 
 export interface TourSpot {
   id: string

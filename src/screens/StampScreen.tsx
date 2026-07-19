@@ -1,31 +1,39 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Stamp as StampIcon, Ticket, Check, QrCode, Sparkles } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import AppShell from '../components/layout/AppShell'
 import { pickLocalized } from '../i18n'
 import { MOCK_TOUR_SPOTS } from '../data/attractions'
 import { addStamp, getCoupon, getStampGoal, getStamps, redeemCoupon } from '../lib/stampModule'
+import type { Coupon, StampEntry } from '../types'
 
 export default function StampScreen() {
-  const { t, lang, showToast } = useApp()
-  const [stamps, setStamps] = useState(getStamps())
-  const [coupon, setCoupon] = useState(getCoupon())
+  const { t, lang, showToast, session, uid } = useApp()
+  const [stamps, setStamps] = useState<StampEntry[]>([])
+  const [coupon, setCoupon] = useState<Coupon | undefined>(undefined)
 
   const goal = getStampGoal()
   const visitedIds = new Set(stamps.map((s) => s.spotId))
   const nextUnvisited = MOCK_TOUR_SPOTS.filter((s) => s.category !== 'stay').find((s) => !visitedIds.has(s.id))
 
-  function handleSimulateVisit() {
-    if (!nextUnvisited) return
-    const res = addStamp(nextUnvisited)
+  useEffect(() => {
+    if (!uid) return
+    getStamps(session.storeId, uid).then(setStamps)
+    getCoupon(session.storeId, uid).then(setCoupon)
+  }, [session.storeId, uid])
+
+  async function handleSimulateVisit() {
+    if (!nextUnvisited || !uid) return
+    const res = await addStamp(session.storeId, uid, nextUnvisited)
     setStamps(res.stamps)
     if (res.coupon) setCoupon(res.coupon)
     const justEarnedCoupon = res.stamps.length === goal && Boolean(res.coupon)
     showToast(justEarnedCoupon ? t('toastCouponIssued') : t('toastStampCollected'))
   }
 
-  function handleRedeem() {
-    const updated = redeemCoupon()
+  async function handleRedeem() {
+    if (!uid) return
+    const updated = await redeemCoupon(session.storeId, uid)
     if (updated) setCoupon(updated)
   }
 

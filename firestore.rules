@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner() {
+      return isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // Write-only event log used for the owner stats dashboard.
+    // Any signed-in visitor (anonymous or owner) can log an event;
+    // only a real (non-anonymous) owner account can read/aggregate them.
+    match /stores/{storeId}/events/{eventId} {
+      allow create: if isSignedIn();
+      allow read: if isOwner();
+      allow update, delete: if false;
+    }
+
+    // Per-visitor stamp/coupon progress. A visitor can only read/write
+    // their own doc; the owner can read every visitor's doc for stats.
+    match /stores/{storeId}/visitors/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+      allow read: if isOwner();
+    }
+  }
+}

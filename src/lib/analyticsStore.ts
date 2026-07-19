@@ -1,12 +1,39 @@
+import { addDoc, collection, getDocs, Timestamp } from 'firebase/firestore'
+import { authReady, db } from './firebase'
 import type { AnalyticsCounters, CourseDuration, Lang } from '../types'
-
-const COUNTERS_KEY = 'tripbite_counters_v1'
-const TREND_KEY = 'tripbite_trend_v1'
-const SEED_FLAG_KEY = 'tripbite_seeded_v1'
 
 type EventType = 'qr_scan' | 'language_selected' | 'course_click' | 'stamp_completed' | 'coupon_issued' | 'coupon_used'
 
-const DEFAULT_COUNTERS: AnalyticsCounters = {
+interface TrackedEvent {
+  type: EventType
+  lang?: Lang
+  duration?: CourseDuration
+  createdAt: Timestamp
+}
+
+function eventsRef(storeId: string) {
+  return collection(db, 'stores', storeId, 'events')
+}
+
+export async function trackEvent(
+  storeId: string,
+  type: EventType,
+  payload?: { lang?: Lang; duration?: CourseDuration },
+) {
+  try {
+    await authReady
+    await addDoc(eventsRef(storeId), {
+      type,
+      lang: payload?.lang ?? null,
+      duration: payload?.duration ?? null,
+      createdAt: Timestamp.now(),
+    })
+  } catch (err) {
+    console.error('[analytics] trackEvent failed', err)
+  }
+}
+
+const EMPTY_COUNTERS: AnalyticsCounters = {
   qrScans: 0,
   courseClicks: 0,
   stampCompletions: 0,
@@ -16,93 +43,51 @@ const DEFAULT_COUNTERS: AnalyticsCounters = {
   coursePopularity: { 30: 0, 60: 0, 120: 0 },
 }
 
-/** Baseline numbers so the judge-facing stats screen reads like a live
- *  service from the first load, instead of an empty dashboard. Live demo
- *  actions (QR scan, course pick, stamp, coupon) add on top of this. */
-const SEED_COUNTERS: AnalyticsCounters = {
-  qrScans: 214,
-  courseClicks: 96,
-  stampCompletions: 31,
-  couponIssued: 34,
-  couponUsed: 22,
-  languageCounts: { ko: 58, en: 74, ja: 61, zh: 43 },
-  coursePopularity: { 30: 28, 60: 52, 120: 16 },
-}
+/** Reads every event doc for the store and aggregates client-side. Fine for
+ * a single-store demo's event volume; a production multi-store version
+ * would move this to server-side aggregation (Cloud Functions + rollup docs). */
+export async function getStats(storeId: string): Promise<{ counters: AnalyticsCounters; trend: number[] }> {
+  const snap = await getDocs(eventsRef(storeId))
+  const events = snap.docs.map((d) => d.data() as TrackedEvent)
 
-const SEED_TREND = [18, 24, 21, 30, 27, 41, 36]
+  const counters: AnalyticsCounters = {
+    ...EMPTY_COUNTERS,
+    languageCounts: { ...EMPTY_COUNTERS.languageCounts },
+    coursePopularity: { ...EMPTY_COUNTERS.coursePopularity },
+  }
 
-function readCounters(): AnalyticsCounters {
-  try {
-    const raw = localStorage.getItem(COUNTERS_KEY)
-    if (!raw) return { ...DEFAULT_COUNTERS }
-    const parsed = JSON.parse(raw)
-    return {
-      ...DEFAULT_COUNTERS,
-      ...parsed,
-      languageCounts: { ...DEFAULT_COUNTERS.languageCounts, ...parsed.languageCounts },
-      coursePopularity: { ...DEFAULT_COUNTERS.coursePopularity, ...parsed.coursePopularity },
+  const trend = new Array(7).fill(0)
+  const now = Date.now()
+  const dayMs = 24 * 60 * 60 * 1000
+  const todayStart = Math.floor(now / dayMs) * dayMs
+
+  for (const event of events) {
+    switch (event.type) {
+      case 'qr_scan': {
+        counters.qrScans += 1
+        const createdAtMs = event.createdAt?.toMillis?.() ?? now
+        const daysAgo = Math.floor((todayStart - Math.floor(createdAtMs / dayMs) * dayMs) / dayMs)
+        if (daysAgo >= 0 && daysAgo < 7) trend[6 - daysAgo] += 1
+        break
+      }
+      case 'course_click':
+        counters.courseClicks += 1
+        if (event.duration) counters.coursePopularity[event.duration] += 1
+        break
+      case 'stamp_completed':
+        counters.stampCompletions += 1
+        break
+      case 'coupon_issued':
+        counters.couponIssued += 1
+        break
+      case 'coupon_used':
+        counters.couponUsed += 1
+        break
+      case 'language_selected':
+        if (event.lang) counters.languageCounts[event.lang] += 1
+        break
     }
-  } catch {
-    return { ...DEFAULT_COUNTERS }
-  }
-}
-
-function writeCounters(counters: AnalyticsCounters) {
-  localStorage.setItem(COUNTERS_KEY, JSON.stringify(counters))
-}
-
-export function ensureSeeded() {
-  if (localStorage.getItem(SEED_FLAG_KEY)) return
-  writeCounters(SEED_COUNTERS)
-  localStorage.setItem(TREND_KEY, JSON.stringify(SEED_TREND))
-  localStorage.setItem(SEED_FLAG_KEY, '1')
-}
-
-export function trackEvent(type: EventType, payload?: { lang?: Lang; duration?: CourseDuration; [key: string]: unknown }) {
-  ensureSeeded()
-  const counters = readCounters()
-
-  switch (type) {
-    case 'qr_scan':
-      counters.qrScans += 1
-      bumpTrendToday()
-      break
-    case 'language_selected':
-      if (payload?.lang) counters.languageCounts[payload.lang] += 1
-      break
-    case 'course_click':
-      counters.courseClicks += 1
-      if (payload?.duration) counters.coursePopularity[payload.duration] += 1
-      break
-    case 'stamp_completed':
-      counters.stampCompletions += 1
-      break
-    case 'coupon_issued':
-      counters.couponIssued += 1
-      break
-    case 'coupon_used':
-      counters.couponUsed += 1
-      break
   }
 
-  writeCounters(counters)
-}
-
-function bumpTrendToday() {
-  try {
-    const raw = localStorage.getItem(TREND_KEY)
-    const trend: number[] = raw ? JSON.parse(raw) : [...SEED_TREND]
-    trend[trend.length - 1] += 1
-    localStorage.setItem(TREND_KEY, JSON.stringify(trend))
-  } catch {
-    localStorage.setItem(TREND_KEY, JSON.stringify(SEED_TREND))
-  }
-}
-
-export function getStats() {
-  ensureSeeded()
-  const counters = readCounters()
-  const trendRaw = localStorage.getItem(TREND_KEY)
-  const trend: number[] = trendRaw ? JSON.parse(trendRaw) : SEED_TREND
   return { counters, trend }
 }
