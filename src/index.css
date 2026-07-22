@@ -1,0 +1,168 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Noto Sans KR", "Noto Sans JP", "Noto Sans SC", system-ui, sans-serif;
+
+  --color-tb-ink: #10201f;
+  --color-tb-ink-soft: #4a5a58;
+  --color-tb-paper: #faf8f4;
+  --color-tb-paper-raised: #ffffff;
+  --color-tb-line: #e6e1d6;
+
+  --color-tb-teal-50: #eef7f5;
+  --color-tb-teal-100: #d3ece7;
+  --color-tb-teal-400: #1f8a82;
+  --color-tb-teal-500: #0f6e68;
+  --color-tb-teal-600: #0b5652;
+  --color-tb-teal-900: #062f2d;
+
+  --color-tb-coral-50: #fff1ec;
+  --color-tb-coral-100: #ffdccf;
+  --color-tb-coral-400: #ff7a52;
+  --color-tb-coral-500: #f3592e;
+  --color-tb-coral-600: #d8431c;
+
+  --color-tb-sand-100: #f4ecd8;
+  --color-tb-sand-300: #e6d5ab;
+
+  --shadow-tb-card: 0 1px 2px rgba(16, 32, 31, 0.04), 0 8px 24px -12px rgba(16, 32, 31, 0.18);
+  --shadow-tb-float: 0 12px 32px -8px rgba(16, 32, 31, 0.28);
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--color-tb-paper);
+  color: var(--color-tb-ink);
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Above phone width, #tb-app-frame (see App.tsx) becomes a framed column
+   instead of a full-bleed layout — give the body a subtle brand backdrop so
+   the space around that frame doesn't read as blank/broken. */
+@media (min-width: 768px) {
+  body {
+    background: radial-gradient(120% 100% at 50% 0%, var(--color-tb-teal-50), var(--color-tb-sand-100) 70%);
+  }
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+/* Consistent tap feedback on every button, without hand-editing each one. */
+button:not(:disabled) {
+  transition: transform 120ms ease, opacity 120ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+button:not(:disabled):active {
+  transform: scale(0.96);
+  opacity: 0.92;
+}
+@media (hover: hover) {
+  a:hover, button:not(:disabled):hover {
+    filter: brightness(1.03);
+  }
+}
+
+@keyframes tb-scan-line {
+  0% { transform: translateY(-46%); }
+  50% { transform: translateY(46%); }
+  100% { transform: translateY(-46%); }
+}
+.tb-scan-line {
+  animation: tb-scan-line 1.6s ease-in-out infinite;
+}
+
+@keyframes tb-pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.5; }
+  70% { transform: scale(1.4); opacity: 0; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+.tb-pulse-ring {
+  animation: tb-pulse-ring 1.8s ease-out infinite;
+}
+
+@keyframes tb-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tb-fade-up {
+  animation: tb-fade-up 0.35s ease-out both;
+}
+
+@keyframes tb-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-6px); }
+  80% { transform: translateX(6px); }
+}
+.tb-shake {
+  animation: tb-shake 0.4s ease-in-out;
+}
+
+@keyframes tb-otp-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.9); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.tb-otp-in {
+  animation: tb-otp-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes tb-otp-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.16); }
+  100% { transform: scale(1); }
+}
+.tb-otp-pop {
+  animation: tb-otp-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes tb-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(243, 89, 46, 0.45), 0 0 18px 2px rgba(243, 89, 46, 0.25); }
+  50% { box-shadow: 0 0 0 6px rgba(243, 89, 46, 0), 0 0 26px 6px rgba(243, 89, 46, 0.45); }
+}
+.tb-glow-pulse {
+  animation: tb-glow-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes tb-orb-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(3%, -4%) scale(1.08); }
+}
+.tb-orb-drift {
+  animation: tb-orb-drift 9s ease-in-out infinite;
+}
+
+@keyframes tb-success-pop {
+  0% { opacity: 0; transform: scale(0.4) rotate(-15deg); }
+  60% { opacity: 1; transform: scale(1.15) rotate(4deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.tb-success-pop {
+  animation: tb-success-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes tb-otp-shimmer {
+  0%, 100% { border-color: rgba(243, 89, 46, 0.5); box-shadow: 0 0 0 0 rgba(243, 89, 46, 0.35); }
+  50% { border-color: rgba(31, 138, 130, 0.9); box-shadow: 0 0 14px 2px rgba(31, 138, 130, 0.5); }
+}
+.tb-otp-shimmer {
+  animation: tb-otp-shimmer 0.9s ease-in-out infinite;
+}
