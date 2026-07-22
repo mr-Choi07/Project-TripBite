@@ -1,16 +1,32 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { X, Trash2, CheckCircle2 } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { pickLocalized } from '../../i18n'
+import { placeOrder, PlaceOrderError } from '../../lib/orders'
 
 export default function CartSheet({ onClose }: { onClose: () => void }) {
-  const { t, lang, cart, removeFromCart, cartTotal, clearCart } = useApp()
+  const { t, lang, session, cart, removeFromCart, cartTotal, clearCart } = useApp()
   const navigate = useNavigate()
   const [ordered, setOrdered] = useState(false)
+  const [orderNumber, setOrderNumber] = useState<number | null>(null)
+  const [placing, setPlacing] = useState(false)
+  const [placeError, setPlaceError] = useState<string | null>(null)
 
-  function handleCheckout() {
-    setOrdered(true)
+  async function handleCheckout() {
+    setPlacing(true)
+    setPlaceError(null)
+    try {
+      const number = await placeOrder(session.storeId, cart, cartTotal, lang)
+      setOrderNumber(number)
+      setOrdered(true)
+    } catch (err) {
+      console.error('[CartSheet] placeOrder failed', err)
+      setPlaceError(err instanceof PlaceOrderError ? err.message : t('cartOrderError'))
+    } finally {
+      setPlacing(false)
+    }
   }
 
   function handleDone() {
@@ -24,7 +40,7 @@ export default function CartSheet({ onClose }: { onClose: () => void }) {
     navigate('/course')
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div className="absolute inset-0 bg-tb-ink/50" onClick={onClose} />
       <div className="tb-fade-up relative w-full max-w-md rounded-t-3xl bg-tb-paper-raised p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
@@ -32,6 +48,9 @@ export default function CartSheet({ onClose }: { onClose: () => void }) {
           <div className="flex flex-col items-center py-4 text-center">
             <CheckCircle2 size={40} className="text-tb-teal-500" />
             <h2 className="mt-3 text-lg font-bold text-tb-ink">{t('cartOrderedTitle')}</h2>
+            {orderNumber != null && (
+              <p className="mt-1 text-2xl font-black tabular-nums text-tb-coral-500">{t('cartOrderNumber', orderNumber)}</p>
+            )}
             <p className="mt-1.5 text-sm leading-relaxed text-tb-ink-soft">{t('cartOrderedBody')}</p>
             <div className="mt-5 w-full rounded-2xl border border-tb-coral-200 bg-tb-coral-50 px-4 py-3 text-sm font-medium text-tb-coral-600">
               {t('cartAfterOrder')}
@@ -92,17 +111,22 @@ export default function CartSheet({ onClose }: { onClose: () => void }) {
               <span className="text-lg font-extrabold text-tb-ink">₩{cartTotal.toLocaleString()}</span>
             </div>
 
+            {placeError && <p className="mt-2 text-center text-xs font-medium text-tb-coral-600">{placeError}</p>}
             <button
               type="button"
-              disabled={cart.length === 0}
+              disabled={cart.length === 0 || placing}
               onClick={handleCheckout}
               className="mt-3 w-full rounded-xl bg-tb-ink py-3.5 text-sm font-bold text-white disabled:opacity-40"
             >
-              {t('cartCheckout')}
+              {placing ? t('cartPlacing') : t('cartCheckout')}
             </button>
           </>
         )}
       </div>
-    </div>
+    </div>,
+    // Portals into the app frame (see App.tsx), not document.body — keeps
+    // this "fixed inset-0" sheet confined to the phone-width frame on a
+    // wide desktop viewport instead of covering the real browser viewport.
+    document.getElementById('tb-app-frame') ?? document.body,
   )
 }

@@ -1,4 +1,4 @@
-import type { TourApiResult, TourCategory, TourContentTypeId, TourSpot } from '../types'
+import type { StorePlace, TourApiResult, TourCategory, TourContentTypeId, TourSpot } from '../types'
 import { MOCK_TOUR_SPOTS } from '../data/attractions'
 
 /**
@@ -46,7 +46,7 @@ function toRad(deg: number) {
   return (deg * Math.PI) / 180
 }
 
-function haversineM(lat1: number, lng1: number, lat2: number, lng2: number) {
+export function haversineM(lat1: number, lng1: number, lat2: number, lng2: number) {
   const R = 6371000
   const dLat = toRad(lat2 - lat1)
   const dLng = toRad(lng2 - lng1)
@@ -99,7 +99,7 @@ async function fetchLiveCategory(
     return {
       id: String(raw.contentid ?? crypto.randomUUID()),
       category,
-      title: { ko: title, en: title, ja: title, zh: title },
+      title: { ko: title, en: title, ja: title, zh: title, fr: title, es: title },
       addr: String(raw.addr1 ?? ''),
       lat: itemLat,
       lng: itemLng,
@@ -117,6 +117,28 @@ function mockForCategories(categories: TourCategory[]): TourSpot[] {
   return MOCK_TOUR_SPOTS.filter((spot) => categories.includes(spot.category)).sort(
     (a, b) => a.distanceM - b.distanceM,
   )
+}
+
+/** Converts other TripBite owners' registered storefronts into course-stop
+ * shape, so a visitor's course can route through real registered stores
+ * alongside TourAPI attractions/festivals/shopping — not just whatever
+ * TourAPI happens to return. Distance is computed fresh from the visitor's
+ * current store, same as every other spot. */
+export function storesToSpots(stores: StorePlace[], originLat: number, originLng: number): TourSpot[] {
+  return stores.map((s) => ({
+    id: `store-${s.storeId}`,
+    category: 'restaurant',
+    title: s.name,
+    addr: s.address,
+    lat: s.lat,
+    lng: s.lng,
+    image: s.heroImage || s.logoImage,
+    tel: s.phone,
+    distanceM: Math.round(haversineM(originLat, originLng, s.lat, s.lng)),
+    crowd: 'medium',
+    interestTags: DEFAULT_INTEREST_TAGS_BY_CATEGORY.restaurant,
+    dwellMinutes: 25,
+  }))
 }
 
 export async function fetchNearbySpots({

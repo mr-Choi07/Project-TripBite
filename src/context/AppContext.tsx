@@ -1,11 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
-import type { CartLine, Lang, MenuItem, QrPayload, WeatherContext } from '../types'
+import type { CartLine, Lang, MenuItem, QrPayload, StorePlace, WeatherContext } from '../types'
 import dict from '../i18n/translations'
 import { trackEvent } from '../lib/analyticsStore'
-import { MENU } from '../data/menu'
+import { getMenu, getStore } from '../lib/storeData'
 import { auth } from '../lib/firebase'
-import { isOwnerUser } from '../lib/ownerAuth'
+import { isOwnerUser, isVerifiedOwner } from '../lib/ownerAuth'
 
 const LANG_KEY = 'tripbite_lang'
 const SESSION_KEY = 'tripbite_session'
@@ -15,7 +15,12 @@ interface SessionState {
   entered: boolean
   storeId: string
   campaignId: string
-  entryMethod: 'qr' | 'demo' | null
+  /** 'preview' is an owner viewing their own store's tourist screens (see
+   * StatsScreen's "관광객 화면 보기") — behaves exactly like a real 'qr' entry
+   * except it never counts toward that store's own analytics (see
+   * `lib/analyticsStore.ts`'s `trackEvent`, which checks this via
+   * localStorage since it has no React context access). */
+  entryMethod: 'qr' | 'preview' | null
 }
 
 const DEFAULT_SESSION: SessionState = {
@@ -43,21 +48,15 @@ function readSession(): SessionState {
 
 function readLang(): Lang {
   const raw = localStorage.getItem(LANG_KEY)
-  if (raw === 'ko' || raw === 'en' || raw === 'ja' || raw === 'zh') return raw
+  if (raw === 'ko' || raw === 'en' || raw === 'ja' || raw === 'zh' || raw === 'fr' || raw === 'es') return raw
   return 'en'
 }
 
-function readCart(): CartLine[] {
+function readCartRaw(): { itemId: string; qty: number }[] {
   try {
     const raw = localStorage.getItem(CART_KEY)
     if (!raw) return []
-    const stored = JSON.parse(raw) as { itemId: string; qty: number }[]
-    return stored
-      .map((line) => {
-        const item = MENU.find((m) => m.id === line.itemId)
-        return item ? { item, qty: line.qty } : null
-      })
-      .filter((line): line is CartLine => line !== null)
+    return JSON.parse(raw) as { itemId: string; qty: number }[]
   } catch {
     return []
   }
@@ -77,8 +76,11 @@ interface AppContextValue {
   t: TFn
   session: SessionState
   enterWithQr: (payload: QrPayload) => void
-  enterAsDemo: () => void
+  enterAsPreview: (payload: QrPayload) => void
   weather: WeatherContext
+  store: StorePlace | null
+  menu: MenuItem[]
+  storeLoading: boolean
   cart: CartLine[]
   addToCart: (item: MenuItem) => void
   removeFromCart: (itemId: string) => void
@@ -91,6 +93,10 @@ interface AppContextValue {
   firebaseUser: User | null
   uid: string | null
   isOwner: boolean
+  isVerifiedOwner: boolean
+  otpVerifiedAt: number | null
+  authTime: number | null
+  refreshFirebaseUser: () => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -99,15 +105,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(readLang)
   const [session, setSession] = useState<SessionState>(readSession)
   const [weather] = useState<WeatherContext>(() => WEATHER_POOL[Math.floor(Math.random() * WEATHER_POOL.length)])
-  const [cart, setCart] = useState<CartLine[]>(readCart)
+  const [store, setStore] = useState<StorePlace | null>(null)
+  const [menu, setMenu] = useState<MenuItem[]>([])
+  const [storeLoading, setStoreLoading] = useState(true)
+  const [cart, setCart] = useState<CartLine[]>([])
+  const cartHydrated = useRef(false)
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null)
   const [authReady, setAuthReady] = useState(false)
+  const [otpVerifiedAt, setOtpVerifiedAt] = useState<number | null>(null)
+  const [authTime, setAuthTime] = useState<number | null>(null)
 
   useEffect(() => {
     writeCart(cart)
   }, [cart])
+
+  useEffect(() => {
+    let active = true
+    setStoreLoading(true)
+    Promise.all([getStore(session.storeId), getMenu(session.storeId)]).then(([s, m]) => {
+      if (!active) return
+      setStore(s)
+      setMenu(m)
+      setStoreLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [session.storeId])
+
+  // Cart is persisted as { itemId, qty } pairs, so it can only be resolved
+  // into full CartLine[] once the store's menu has loaded. Runs once per
+  // menu load rather than on every menu change, so it doesn't clobber cart
+  // edits made after the initial hydration.
+  useEffect(() => {
+    if (cartHydrated.current || menu.length === 0) return
+    cartHydrated.current = true
+    const stored = readCartRaw()
+    const hydrated = stored
+      .map((line) => {
+        const item = menu.find((m) => m.id === line.itemId)
+        return item ? { item, qty: line.qty } : null
+      })
+      .filter((line): line is CartLine => line !== null)
+    if (hydrated.length > 0) setCart(hydrated)
+  }, [menu])
 
   useEffect(() => {
     // lib/firebase.ts owns triggering the anonymous sign-in itself (see
@@ -116,8 +159,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!user) return
       setFirebaseUser(user)
       setAuthReady(true)
+      user.getIdTokenResult().then((result) => {
+        const claim = result.claims.otpVerifiedAt
+        setOtpVerifiedAt(typeof claim === 'number' ? claim : null)
+        setAuthTime(new Date(result.authTime).getTime())
+      })
     })
     return unsubscribe
+  }, [])
+
+  // After a fresh OTP/trusted-device verification (or the owner clicking an
+  // email link in another tab), the SDK's cached user object and ID token
+  // still reflect the old state until we force a refresh — this re-fetches
+  // both so isVerifiedOwner reflects reality both client-side (React state)
+  // and server-side (the token Firestore rules and Cloud Functions see).
+  const refreshFirebaseUser = useCallback(async () => {
+    if (!auth.currentUser) return
+    await auth.currentUser.reload()
+    const result = await auth.currentUser.getIdTokenResult(true)
+    const claim = result.claims.otpVerifiedAt
+    setOtpVerifiedAt(typeof claim === 'number' ? claim : null)
+    setAuthTime(new Date(result.authTime).getTime())
+    // NOT `{ ...auth.currentUser }` — spreading a Firebase User instance
+    // copies only its own data properties and drops everything on its
+    // prototype (getIdToken, reload, delete, ...), leaving a method-less
+    // impostor that throws "x.getIdToken is not a function" the next time
+    // any lib call (phone re-link, password change, etc.) receives this
+    // `firebaseUser` from context and tries to call a method on it. The real
+    // object is mutated in place by `.reload()` above, and the otpVerifiedAt/
+    // authTime state changes just below already guarantee this component
+    // re-renders — so passing the live reference through is both correct
+    // and sufficient for consumers to see the refreshed fields.
+    setFirebaseUser(auth.currentUser)
   }, [])
 
   const showToast = useCallback((message: string) => {
@@ -141,16 +214,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setSession(next)
     localStorage.setItem(SESSION_KEY, JSON.stringify(next))
-    setLang(payload.lang, { silent: true })
-    trackEvent(payload.storeId, 'qr_scan')
-    trackEvent(payload.storeId, 'language_selected', { lang: payload.lang })
-  }, [setLang])
 
-  const enterAsDemo = useCallback(() => {
-    const next: SessionState = { ...DEFAULT_SESSION, entered: true, entryMethod: 'demo' }
+    // The QR's encoded language is only a *default suggestion* for a visitor
+    // who's never chosen one — if they've already picked a language (even
+    // by just using the app once before), scanning a different store's QR
+    // must never silently overwrite that explicit choice back to whatever
+    // language happened to be baked into this particular code.
+    const hasExistingLangPreference = localStorage.getItem(LANG_KEY) !== null
+    if (!hasExistingLangPreference) {
+      setLang(payload.lang, { silent: true })
+    }
+    trackEvent(payload.storeId, 'qr_scan')
+    trackEvent(payload.storeId, 'language_selected', { lang: hasExistingLangPreference ? lang : payload.lang })
+  }, [setLang, lang])
+
+  // Owner previewing their own store's tourist screens (StatsScreen's
+  // "관광객 화면 보기") — identical to enterWithQr except entryMethod is
+  // 'preview' instead of 'qr', which `trackEvent` checks to skip writing
+  // analytics for the rest of this session (see lib/analyticsStore.ts).
+  const enterAsPreview = useCallback((payload: QrPayload) => {
+    const next: SessionState = {
+      entered: true,
+      storeId: payload.storeId,
+      campaignId: payload.campaignId,
+      entryMethod: 'preview',
+    }
     setSession(next)
     localStorage.setItem(SESSION_KEY, JSON.stringify(next))
-    trackEvent(next.storeId, 'qr_scan')
   }, [])
 
   const addToCart = useCallback((item: MenuItem) => {
@@ -187,8 +277,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     t,
     session,
     enterWithQr,
-    enterAsDemo,
+    enterAsPreview,
     weather,
+    store,
+    menu,
+    storeLoading,
     cart,
     addToCart,
     removeFromCart,
@@ -201,6 +294,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     firebaseUser,
     uid: firebaseUser?.uid ?? null,
     isOwner: isOwnerUser(firebaseUser),
+    isVerifiedOwner: isVerifiedOwner(firebaseUser, otpVerifiedAt, authTime),
+    otpVerifiedAt,
+    authTime,
+    refreshFirebaseUser,
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

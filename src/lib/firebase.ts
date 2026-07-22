@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth, onAuthStateChanged, signInAnonymously } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
+import { getStorage } from 'firebase/storage'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -14,6 +15,7 @@ const firebaseConfig = {
 export const firebaseApp = initializeApp(firebaseConfig)
 export const auth = getAuth(firebaseApp)
 export const db = getFirestore(firebaseApp)
+export const storage = getStorage(firebaseApp)
 
 /** Resolves once the SDK has an auth token attached to the client (anonymous
  * or real). Firestore calls await this first so a write fired right at app

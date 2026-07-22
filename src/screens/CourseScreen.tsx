@@ -5,9 +5,9 @@ import { useApp } from '../context/AppContext'
 import AppShell from '../components/layout/AppShell'
 import Tag from '../components/ui/Tag'
 import CourseMap from '../components/course/CourseMap'
-import { SUNRISE_BOWL } from '../data/place'
 import { pickLocalized } from '../i18n'
-import { fetchNearbySpots } from '../lib/tourApi'
+import { fetchNearbySpots, storesToSpots } from '../lib/tourApi'
+import { getAllStores } from '../lib/storeData'
 import { buildCourse, pickBonusStay, weatherReason, INTEREST_OPTIONS, INTEREST_LABEL, formatCourseDistance } from '../lib/recommendationEngine'
 import { addStamp, getStampGoal, getStamps } from '../lib/stampModule'
 import { trackEvent } from '../lib/analyticsStore'
@@ -28,7 +28,7 @@ const CATEGORY_KEY = {
 } as const
 
 export default function CourseScreen() {
-  const { t, lang, weather, showToast, session, uid } = useApp()
+  const { t, lang, weather, showToast, session, uid, store, storeLoading } = useApp()
   const navigate = useNavigate()
 
   const [spots, setSpots] = useState<TourSpot[]>([])
@@ -39,18 +39,23 @@ export default function CourseScreen() {
   const [visited, setVisited] = useState<Set<string>>(new Set())
 
   useEffect(() => {
+    if (!store) return
     let active = true
     setLoading(true)
-    fetchNearbySpots({ lat: SUNRISE_BOWL.lat, lng: SUNRISE_BOWL.lng }).then((res) => {
+    Promise.all([
+      fetchNearbySpots({ lat: store.lat, lng: store.lng }),
+      getAllStores(store.storeId),
+    ]).then(([res, otherStores]) => {
       if (!active) return
-      setSpots(res.spots)
+      const storeSpots = storesToSpots(otherStores, store.lat, store.lng)
+      setSpots([...res.spots, ...storeSpots].sort((a, b) => a.distanceM - b.distanceM))
       setSource(res.source)
       setLoading(false)
     })
     return () => {
       active = false
     }
-  }, [])
+  }, [store])
 
   useEffect(() => {
     if (!uid) return
@@ -134,7 +139,7 @@ export default function CourseScreen() {
           {weatherText[lang]}
         </div>
 
-        {loading ? (
+        {loading || storeLoading || !store ? (
           <div className="mt-8 flex flex-col items-center gap-2 py-10 text-tb-ink-soft">
             <Sparkles size={22} className="animate-pulse text-tb-teal-500" />
             <p className="text-xs">{t('aiAnalyzing')}</p>
@@ -155,7 +160,7 @@ export default function CourseScreen() {
 
             <div className="mt-4">
               <CourseMap
-                origin={{ lat: SUNRISE_BOWL.lat, lng: SUNRISE_BOWL.lng, label: pickLocalized(SUNRISE_BOWL.name, lang) }}
+                origin={{ lat: store.lat, lng: store.lng, label: pickLocalized(store.name, lang) }}
                 stops={course.stops.map((stop) => ({
                   lat: stop.spot.lat,
                   lng: stop.spot.lng,
@@ -170,7 +175,7 @@ export default function CourseScreen() {
                   <MapPin size={11} />
                 </span>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-tb-ink-soft">{t('courseStartFrom')}</p>
-                <p className="text-sm font-bold text-tb-ink">{pickLocalized(SUNRISE_BOWL.name, lang)}</p>
+                <p className="text-sm font-bold text-tb-ink">{pickLocalized(store.name, lang)}</p>
               </li>
 
               {course.stops.map((stop) => (

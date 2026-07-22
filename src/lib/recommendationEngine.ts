@@ -38,6 +38,8 @@ const LANG_SWITCH_KEYWORDS: Record<Lang, string[]> = {
   en: ['in english', 'english please'],
   ja: ['일본어로', 'japanese please', '日本語で', '日本語'],
   zh: ['중국어로', 'chinese please', '中文', '用中文'],
+  fr: ['프랑스어로', 'french please', 'en français', 'français'],
+  es: ['스페인어로', 'spanish please', 'en español', 'español'],
 }
 
 export function parseMenuIntent(rawText: string): Partial<MenuFilterInput> & { detectedLang?: Lang } {
@@ -69,7 +71,7 @@ function allergenLabel(lang: Lang, allergen: Allergen): string {
 }
 
 function buildLocalized(build: (lang: Lang) => string): LocalizedText {
-  return { ko: build('ko'), en: build('en'), ja: build('ja'), zh: build('zh') }
+  return { ko: build('ko'), en: build('en'), ja: build('ja'), zh: build('zh'), fr: build('fr'), es: build('es') }
 }
 
 export function recommendMenu(menu: MenuItem[], input: MenuFilterInput): MenuAdviceResult {
@@ -130,6 +132,10 @@ function avoidAllergyText(lang: Lang, allergens: Allergen[]) {
       return `${labels}を含む — アレルギー注意`
     case 'zh':
       return `含有${labels} — 请注意过敏`
+    case 'fr':
+      return `Contient ${labels} — risque d'allergie`
+    case 'es':
+      return `Contiene ${labels} — riesgo de alergia`
     default:
       return `Contains ${labels} — allergy risk`
   }
@@ -142,6 +148,10 @@ function avoidVeganText(lang: Lang) {
       return 'ビーガン条件に合いません'
     case 'zh':
       return '不符合纯素需求'
+    case 'fr':
+      return 'Ne convient pas aux régimes végans'
+    case 'es':
+      return 'No apto para dietas veganas'
     default:
       return 'Not suitable for vegan diets'
   }
@@ -154,6 +164,10 @@ function avoidHalalText(lang: Lang) {
       return 'ハラール認証メニューではありません'
     case 'zh':
       return '非清真认证菜品'
+    case 'fr':
+      return 'Pas certifié halal'
+    case 'es':
+      return 'No certificado halal'
     default:
       return 'Not halal-certified'
   }
@@ -166,6 +180,10 @@ function signatureText(lang: Lang) {
       return '店のシグネチャーメニュー'
     case 'zh':
       return '本店招牌菜'
+    case 'fr':
+      return 'Plat signature de la maison'
+    case 'es':
+      return 'Plato insignia de la casa'
     default:
       return 'House signature dish'
   }
@@ -181,17 +199,47 @@ function matchReasonText(lang: Lang, item: MenuItem, input: MenuFilterInput, not
         ? `${labels}不使用`
         : lang === 'zh'
         ? `不含${labels}`
+        : lang === 'fr'
+        ? `Sans ${labels}`
+        : lang === 'es'
+        ? `Sin ${labels}`
         : `Free of ${labels}`,
     )
   }
   if (notes.includes('vegan')) {
-    parts.push(lang === 'ko' ? '비건' : lang === 'ja' ? 'ビーガン対応' : lang === 'zh' ? '纯素' : 'Vegan')
+    parts.push(
+      lang === 'ko' ? '비건' : lang === 'ja' ? 'ビーガン対応' : lang === 'zh' ? '纯素' : lang === 'fr' ? 'Végan' : lang === 'es' ? 'Vegano' : 'Vegan',
+    )
   }
   if (notes.includes('halal')) {
-    parts.push(lang === 'ko' ? '할랄 인증' : lang === 'ja' ? 'ハラール認証' : lang === 'zh' ? '清真认证' : 'Halal-certified')
+    parts.push(
+      lang === 'ko'
+        ? '할랄 인증'
+        : lang === 'ja'
+        ? 'ハラール認証'
+        : lang === 'zh'
+        ? '清真认证'
+        : lang === 'fr'
+        ? 'Certifié halal'
+        : lang === 'es'
+        ? 'Certificado halal'
+        : 'Halal-certified',
+    )
   }
   if (notes.includes('light')) {
-    parts.push(lang === 'ko' ? '가벼운 한 끼' : lang === 'ja' ? '軽めの一食' : lang === 'zh' ? '清淡一餐' : 'A lighter meal')
+    parts.push(
+      lang === 'ko'
+        ? '가벼운 한 끼'
+        : lang === 'ja'
+        ? '軽めの一食'
+        : lang === 'zh'
+        ? '清淡一餐'
+        : lang === 'fr'
+        ? 'Un repas léger'
+        : lang === 'es'
+        ? 'Una comida ligera'
+        : 'A lighter meal',
+    )
   }
   if (item.signature) {
     parts.push(signatureText(lang))
@@ -210,20 +258,50 @@ const INTEREST_TOLERANCE_MIN = 10
 const CATEGORY_CAP_PER_COURSE = 2
 const COURSE_EXCLUDED_CATEGORIES = ['stay'] as const
 
+/** Without this, a course reads as "just a string of restaurants" once
+ * enough TripBite-registered stores (all category 'restaurant') get folded
+ * into the spot pool alongside TourAPI data — the flat per-category cap of
+ * 2 doesn't stop restaurants from being 2 of e.g. only 3 total stops. Caps
+ * are tightened outside meal hours so the route actually varies with the
+ * time someone is walking it, and loosened right at lunch/dinner. */
+type TimeSlot = 'morning' | 'lunch' | 'afternoon' | 'dinner' | 'night'
+
+function currentTimeSlot(): TimeSlot {
+  const hour = new Date().getHours()
+  if (hour >= 6 && hour < 11) return 'morning'
+  if (hour >= 11 && hour < 14) return 'lunch'
+  if (hour >= 14 && hour < 17) return 'afternoon'
+  if (hour >= 17 && hour < 21) return 'dinner'
+  return 'night'
+}
+
+const RESTAURANT_CAP_BY_TIME_SLOT: Record<TimeSlot, number> = {
+  morning: 1,
+  lunch: 2,
+  afternoon: 1,
+  dinner: 2,
+  night: 1,
+}
+
+function categoryCapFor(category: TourSpot['category'], timeSlot: TimeSlot): number {
+  if (category === 'restaurant') return RESTAURANT_CAP_BY_TIME_SLOT[timeSlot]
+  return CATEGORY_CAP_PER_COURSE
+}
+
 const INTEREST_LABEL: Record<string, LocalizedText> = {
-  바다: { ko: '바다', en: 'ocean views', ja: '海の景色', zh: '海景' },
-  산책: { ko: '산책', en: 'walking', ja: '散歩', zh: '散步' },
-  사진: { ko: '사진 명소', en: 'photo spots', ja: '写真スポット', zh: '拍照打卡' },
-  자연: { ko: '자연', en: 'nature', ja: '自然', zh: '自然风光' },
-  전망: { ko: '전망', en: 'scenic views', ja: '眺望', zh: '观景' },
-  로컬맛집: { ko: '로컬 맛집', en: 'local food', ja: '地元グルメ', zh: '本地美食' },
-  전통시장: { ko: '전통시장', en: 'traditional markets', ja: '伝統市場', zh: '传统市场' },
-  쇼핑: { ko: '쇼핑', en: 'shopping', ja: 'ショッピング', zh: '购物' },
-  축제: { ko: '축제', en: 'festivals', ja: '祭り', zh: '节庆' },
-  로컬푸드: { ko: '로컬 푸드', en: 'local food', ja: 'ローカルフード', zh: '本地美食' },
-  해산물: { ko: '해산물', en: 'seafood', ja: '海鮮', zh: '海鲜' },
-  레트로: { ko: '레트로', en: 'retro spots', ja: 'レトロ', zh: '复古怀旧' },
-  기차: { ko: '기차역', en: 'train station', ja: '駅', zh: '火车站' },
+  바다: { ko: '바다', en: 'ocean views', ja: '海の景色', zh: '海景', fr: 'vue sur mer', es: 'vistas al mar' },
+  산책: { ko: '산책', en: 'walking', ja: '散歩', zh: '散步', fr: 'promenade', es: 'paseo' },
+  사진: { ko: '사진 명소', en: 'photo spots', ja: '写真スポット', zh: '拍照打卡', fr: 'spots photo', es: 'lugares para fotos' },
+  자연: { ko: '자연', en: 'nature', ja: '自然', zh: '自然风光', fr: 'nature', es: 'naturaleza' },
+  전망: { ko: '전망', en: 'scenic views', ja: '眺望', zh: '观景', fr: 'vues panoramiques', es: 'vistas panorámicas' },
+  로컬맛집: { ko: '로컬 맛집', en: 'local food', ja: '地元グルメ', zh: '本地美食', fr: 'cuisine locale', es: 'comida local' },
+  전통시장: { ko: '전통시장', en: 'traditional markets', ja: '伝統市場', zh: '传统市场', fr: 'marchés traditionnels', es: 'mercados tradicionales' },
+  쇼핑: { ko: '쇼핑', en: 'shopping', ja: 'ショッピング', zh: '购物', fr: 'shopping', es: 'compras' },
+  축제: { ko: '축제', en: 'festivals', ja: '祭り', zh: '节庆', fr: 'festivals', es: 'festivales' },
+  로컬푸드: { ko: '로컬 푸드', en: 'local food', ja: 'ローカルフード', zh: '本地美食', fr: 'cuisine locale', es: 'comida local' },
+  해산물: { ko: '해산물', en: 'seafood', ja: '海鮮', zh: '海鲜', fr: 'fruits de mer', es: 'mariscos' },
+  레트로: { ko: '레트로', en: 'retro spots', ja: 'レトロ', zh: '复古怀旧', fr: 'lieux rétro', es: 'lugares retro' },
+  기차: { ko: '기차역', en: 'train station', ja: '駅', zh: '火车站', fr: 'gare', es: 'estación de tren' },
 }
 
 export const INTEREST_OPTIONS = Object.keys(INTEREST_LABEL)
@@ -283,60 +361,84 @@ export function buildCourse(
   spots: TourSpot[],
   interests: string[] = [],
 ): Course {
-  const candidates = spots
+  // Selection is decided in two passes — interest-matched spots (closest
+  // first) get first claim on the budget, then the closest remaining spots
+  // fill whatever's left — so toggling an interest tag actually changes
+  // which stops win a slot, not just how much budget slack they get.
+  const eligible = spots
     .filter((s) => !COURSE_EXCLUDED_CATEGORIES.includes(s.category as (typeof COURSE_EXCLUDED_CATEGORIES)[number]))
     .sort((a, b) => a.distanceM - b.distanceM)
 
+  const matched = interests.length > 0 ? eligible.filter((s) => s.interestTags.some((tag) => interests.includes(tag))) : []
+  const unmatched = eligible.filter((s) => !matched.includes(s))
+
   const budget = duration + BUDGET_TOLERANCE_MIN[duration]
-  const stops: CourseStop[] = []
+  const selected: TourSpot[] = []
   let elapsedMinutes = 0
   let prevDistanceM = 0
   const categoryCounts: Partial<Record<TourSpot['category'], number>> = {}
+  const timeSlot = currentTimeSlot()
 
-  for (const spot of candidates) {
-    // Cap how many stops of the same category a course can take, so a
-    // cluster of nearby restaurants can't crowd out every other category —
-    // a farther attraction/shop still gets a shot at the remaining budget.
-    if ((categoryCounts[spot.category] ?? 0) >= CATEGORY_CAP_PER_COURSE) continue
+  function tryAdmit(spot: TourSpot, matchesInterest: boolean) {
+    if ((categoryCounts[spot.category] ?? 0) >= categoryCapFor(spot.category, timeSlot)) return
 
     const travelDistance = Math.max(0, spot.distanceM - prevDistanceM)
     const travelMinutes = Math.round(travelDistance / WALK_PACE_M_PER_MIN)
     const projected = elapsedMinutes + travelMinutes + spot.dwellMinutes
 
     // A spot matching the traveler's selected interests earns extra budget
-    // leniency, so toggling interest chips can actually change which stops
-    // make the cut — not just decorate the reason tags. The 30-minute tier
-    // stays strict so it remains a meaningfully smaller option than 60/120.
-    const matchesInterest = duration !== 30 && spot.interestTags.some((tag) => interests.includes(tag))
-    const effectiveBudget = matchesInterest ? budget + INTEREST_TOLERANCE_MIN : budget
+    // leniency. The 30-minute tier stays strict so it remains a meaningfully
+    // smaller option than 60/120.
+    const effectiveBudget = duration !== 30 && matchesInterest ? budget + INTEREST_TOLERANCE_MIN : budget
 
     if (projected > effectiveBudget) {
-      if (stops.length === 0 && duration === 120) {
+      if (selected.length === 0 && duration === 120) {
         // guarantee at least one stop even on a tight mock dataset
       } else {
-        continue
+        return
       }
     }
+
+    selected.push(spot)
+    categoryCounts[spot.category] = (categoryCounts[spot.category] ?? 0) + 1
+    elapsedMinutes = projected
+    prevDistanceM = spot.distanceM
+  }
+
+  for (const spot of matched) tryAdmit(spot, true)
+  for (const spot of unmatched) tryAdmit(spot, false)
+
+  // Walk the selected spots back in distance order so the route itself
+  // stays a coherent, ever-outward path rather than jumping around based on
+  // selection order.
+  selected.sort((a, b) => a.distanceM - b.distanceM)
+
+  const stops: CourseStop[] = []
+  let walkedMinutes = 0
+  let walkedDistanceM = 0
+
+  for (const spot of selected) {
+    const travelDistance = Math.max(0, spot.distanceM - walkedDistanceM)
+    const travelMinutes = Math.round(travelDistance / WALK_PACE_M_PER_MIN)
 
     stops.push({
       spot,
       order: stops.length + 1,
       travelMinutesFromPrev: travelMinutes,
       travelDistanceFromPrevM: travelDistance,
-      arrivalMinuteOffset: elapsedMinutes + travelMinutes,
+      arrivalMinuteOffset: walkedMinutes + travelMinutes,
       reasons: buildStopReasons(spot, travelMinutes, interests),
     })
 
-    categoryCounts[spot.category] = (categoryCounts[spot.category] ?? 0) + 1
-    elapsedMinutes = projected
-    prevDistanceM = spot.distanceM
+    walkedMinutes += travelMinutes + spot.dwellMinutes
+    walkedDistanceM = spot.distanceM
   }
 
   return {
     duration,
     stops,
-    totalMinutes: elapsedMinutes,
-    totalDistanceM: prevDistanceM,
+    totalMinutes: walkedMinutes,
+    totalDistanceM: walkedDistanceM,
   }
 }
 

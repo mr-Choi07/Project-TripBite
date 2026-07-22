@@ -36,7 +36,7 @@ export default function MenuCard({ item, inCart, onAdd }: { item: MenuItem; inCa
           </div>
         </div>
 
-        <p className="mt-1.5 truncate text-[11px] text-tb-ink-soft/80">
+        <p className="mt-1.5 text-[11px] leading-snug text-tb-ink-soft/80">
           {t('menuIngredients')}: {item.ingredients[lang].join(', ')}
         </p>
 

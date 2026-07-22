@@ -1,4 +1,4 @@
-export type Lang = 'ko' | 'en' | 'ja' | 'zh'
+export type Lang = 'ko' | 'en' | 'ja' | 'zh' | 'fr' | 'es'
 
 export type LocalizedText = Record<Lang, string>
 
@@ -26,6 +26,7 @@ export interface MenuItem {
 export interface StorePlace {
   storeId: string
   campaignId: string
+  ownerUid: string
   name: LocalizedText
   areaName: LocalizedText
   address: string
@@ -36,6 +37,12 @@ export interface StorePlace {
   hours: string
   phone: string
   tagline: LocalizedText
+  /** 10-digit business registration number (사업자등록번호), digits only. */
+  businessNumber: string
+  /** 대표자성명 — matched against NTS records for `businessNumber`. */
+  representativeName: string
+  /** 개업일자 (YYYYMMDD), matched against NTS records for `businessNumber`. */
+  businessOpenDate: string
 }
 
 export interface QrPayload {
@@ -152,6 +159,32 @@ export interface Coupon {
   used: boolean
   usedAt?: number
   discountLabel: LocalizedText
+}
+
+export type OrderStatus = 'placed' | 'preparing' | 'ready' | 'completed' | 'cancelled'
+
+export interface OrderLine {
+  itemId: string
+  /** Snapshot of the item's name/price at order time, so a later menu edit
+   * or deletion doesn't change what an already-placed order shows. */
+  name: LocalizedText
+  price: number
+  qty: number
+}
+
+export interface Order {
+  id: string
+  storeId: string
+  /** Daily queue number (resets each day), assigned server-side — lets the
+   * owner say "3번 고객님" instead of identifying orders by a Firestore id. */
+  orderNumber: number
+  lines: OrderLine[]
+  total: number
+  status: OrderStatus
+  /** Visitor's language at order time — lets the owner see who they're
+   * serving without needing to ask. */
+  lang: Lang
+  createdAtMs: number
 }
 
 export interface AnalyticsCounters {

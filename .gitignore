@@ -11,10 +11,13 @@ node_modules
 dist
 dist-ssr
 *.local
+functions/lib
+.firebase
 
 # Local secrets — never commit real API keys
 .env
 .env.*.local
+functions/.secret.local
 
 # Editor directories and files
 .vscode/*

@@ -7,21 +7,162 @@ service cloud.firestore {
     function isOwner() {
       return isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
+    // Store registration/management requires a session that has passed phone
+    // 2FA *recently* — not just a non-anonymous account, and not merely
+    // "linked a phone number once, ever". `otpVerifiedAt` is a custom claim
+    // set by functions/src/index.ts on every successful `markPhoneVerified`
+    // or `verifyTrustedDevice` call; it must be within the last 24h, matching
+    // OTP_SESSION_TTL_MS there. A stolen password alone can't pass this —
+    // the attacker would also need a valid trusted-device token or the
+    // owner's actual phone.
+    //
+    // Critically, `otpVerifiedAt` lives on the *account*, so it doesn't
+    // clear itself just because a brand-new sign-in happens elsewhere (e.g.
+    // an attacker with a stolen password, on an untrusted device). Requiring
+    // it to be >= auth_time (when *this* sign-in actually happened, which
+    // — unlike iat — doesn't advance on silent hourly token refreshes)
+    // forces every new sign-in to re-pass OTP or trusted-device verification
+    // before it can inherit an older session's freshness.
+    function isVerifiedOwner() {
+      return isOwner()
+        && request.auth.token.otpVerifiedAt is number
+        && request.auth.token.otpVerifiedAt >= request.auth.token.auth_time * 1000
+        && request.time.toMillis() - request.auth.token.otpVerifiedAt < 24 * 60 * 60 * 1000;
+    }
+
+    function isLocalizedText(v) {
+      return v is map && v.keys().hasAll(['ko', 'en', 'ja', 'zh', 'fr', 'es']);
+    }
+
+    // Defense-in-depth data shape/size checks so a compromised or buggy
+    // client can't write malformed or oversized documents even though it
+    // already owns the store — these mirror src/types/index.ts.
+    function isValidStoreDoc(data, storeId) {
+      return data.keys().hasAll(
+               ['storeId', 'campaignId', 'ownerUid', 'name', 'areaName', 'tagline', 'address', 'lat', 'lng', 'heroImage', 'logoImage', 'hours', 'phone', 'businessNumber', 'representativeName', 'businessOpenDate']
+             )
+        && data.storeId == storeId
+        && data.storeId.matches('^[a-z0-9-]{3,40}$')
+        && data.ownerUid == request.auth.uid
+        && isLocalizedText(data.name)
+        && isLocalizedText(data.areaName)
+        && isLocalizedText(data.tagline)
+        && data.campaignId is string && data.campaignId.size() <= 100
+        && data.address is string && data.address.size() <= 300
+        && data.hours is string && data.hours.size() <= 100
+        && data.phone is string && data.phone.size() <= 30
+        && data.heroImage is string && data.heroImage.size() <= 1000
+        && data.logoImage is string && data.logoImage.size() <= 1000
+        && data.lat is number && data.lat >= -90 && data.lat <= 90
+        && data.lng is number && data.lng >= -180 && data.lng <= 180
+        // Format-only checks — the *authenticity* of this business number
+        // (does it really belong to this representative, is it still
+        // active) is confirmed once by verifyBusinessRegistration before
+        // the client is allowed to submit this write at all; rules can't
+        // call the NTS API themselves, so this is defense-in-depth against
+        // a malformed/tampered write, not a re-verification.
+        && data.businessNumber is string && data.businessNumber.matches('^[0-9]{10}$')
+        && data.representativeName is string && data.representativeName.size() >= 1 && data.representativeName.size() <= 50
+        && data.businessOpenDate is string && data.businessOpenDate.matches('^[0-9]{8}$');
+    }
+
+    function isValidMenuItem(data, itemId) {
+      return data.keys().hasAll(['id', 'category', 'name', 'description', 'ingredients', 'price', 'image', 'tags', 'allergens', 'spicyLevel', 'calorie'])
+        && data.id == itemId
+        && data.category == 'bowl'
+        && isLocalizedText(data.name)
+        && isLocalizedText(data.description)
+        && data.ingredients is map
+        && data.price is number && data.price >= 0 && data.price <= 10000000
+        && data.image is string && data.image.size() <= 1000
+        && data.tags is list
+        && data.allergens is list
+        && data.spicyLevel is int && data.spicyLevel >= 0 && data.spicyLevel <= 3
+        && data.calorie in ['light', 'regular', 'hearty'];
+    }
+
+    // Store profile + menu. Anyone signed in (visitors are auto-signed-in
+    // anonymously, see lib/firebase.ts) can read a storefront and its menu.
+    // Only the verified owner account that created the store — matched by
+    // ownerUid on the store doc — can write to it or its menu subcollection.
+    match /stores/{storeId} {
+      allow read: if isSignedIn();
+      allow create: if isVerifiedOwner() && isValidStoreDoc(request.resource.data, storeId);
+      // Business registration fields are checked against the NTS API once,
+      // at creation — re-verifying on every edit would burn through that
+      // API's rate limit for no reason, since the identity of the business
+      // behind a store shouldn't change anyway. Locking them here (not just
+      // in the form UI) means even a direct API write can't change them
+      // without going through registration again under a new storeId.
+      allow update: if isVerifiedOwner() && resource.data.ownerUid == request.auth.uid
+                    && isValidStoreDoc(request.resource.data, storeId)
+                    && request.resource.data.businessNumber == resource.data.businessNumber
+                    && request.resource.data.representativeName == resource.data.representativeName
+                    && request.resource.data.businessOpenDate == resource.data.businessOpenDate;
+      allow delete: if false;
+
+      match /menu/{itemId} {
+        allow read: if isSignedIn();
+        allow write: if isVerifiedOwner()
+                     && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerUid == request.auth.uid
+                     && isValidMenuItem(request.resource.data, itemId);
+        allow delete: if isVerifiedOwner()
+                      && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerUid == request.auth.uid;
+      }
+    }
 
     // Write-only event log used for the owner stats dashboard.
     // Any signed-in visitor (anonymous or owner) can log an event;
-    // only a real (non-anonymous) owner account can read/aggregate them.
+    // only a verified owner account can read/aggregate them.
     match /stores/{storeId}/events/{eventId} {
       allow create: if isSignedIn();
-      allow read: if isOwner();
+      allow read: if isVerifiedOwner();
       allow update, delete: if false;
+    }
+
+    // Orders placed by visitors, managed by the owner. Creation only ever
+    // happens server-side via the `submitOrder` Cloud Function (Admin SDK,
+    // bypasses these rules) — not a direct client write — because that's
+    // the only place it can be rate-limited; Firestore rules can validate
+    // shape but can't throttle *how many* writes a session makes. A visitor
+    // never reads the order list back (no visitor-facing order history
+    // feature yet) — only the verified owner who owns this store can see
+    // and manage incoming orders. Owner updates are restricted to *only*
+    // the status field, so a compromised owner session still can't rewrite
+    // the items/total of an order after the fact.
+    match /stores/{storeId}/orders/{orderId} {
+      allow create: if false;
+      allow read: if isVerifiedOwner() && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerUid == request.auth.uid;
+      allow update: if isVerifiedOwner()
+                    && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerUid == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+                    && request.resource.data.status in ['placed', 'preparing', 'ready', 'completed', 'cancelled'];
+      allow delete: if false;
+    }
+
+    // Daily order-number counters, touched only by the Admin SDK from
+    // `submitOrder` (see functions/src/index.ts).
+    match /stores/{storeId}/counters/{day} {
+      allow read, write: if false;
     }
 
     // Per-visitor stamp/coupon progress. A visitor can only read/write
     // their own doc; the owner can read every visitor's doc for stats.
     match /stores/{storeId}/visitors/{uid} {
       allow read, write: if isSignedIn() && request.auth.uid == uid;
-      allow read: if isOwner();
+      allow read: if isVerifiedOwner();
+    }
+
+    // Trusted-device tokens and rate-limit counters are only ever touched by
+    // the Admin SDK from functions/src/index.ts, which bypasses these rules
+    // entirely — explicit deny here so no client SDK call can read or write
+    // them directly (they hold only hashes, but there's no reason to expose
+    // even that).
+    match /trustedDevices/{uid}/devices/{deviceId} {
+      allow read, write: if false;
+    }
+    match /rateLimits/{key} {
+      allow read, write: if false;
     }
   }
 }

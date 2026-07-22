@@ -64,6 +64,8 @@ export async function addStamp(
         en: '20% off at Sunrise Bowl',
         ja: 'サンライズボウル20%割引',
         zh: '日出碗9折优惠',
+        fr: '20% de réduction chez Sunrise Bowl',
+        es: '20% de descuento en Sunrise Bowl',
       },
     }
     trackEvent(storeId, 'stamp_completed')

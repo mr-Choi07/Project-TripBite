@@ -23,6 +23,26 @@ npm run build     # 프로덕션 빌드 (dist/)
 
 QR 스캔 → 메뉴 이해/AI 추천 → 식사 후 주변 관광 코스 추천 → 스탬프/쿠폰으로 방문 유도
 
+## 다국어 자동 번역 (DeepL, 준비됨 · 키 미설정)
+
+매장/메뉴 데이터를 늘릴 때 5개 언어를 전부 손으로 쓰지 않도록, 한국어 원문을 DeepL로 초안 번역하는
+Cloud Function(`functions/src/index.ts`의 `translateFields`)을 준비해뒀습니다. API 키가 아직 없어도
+코드/타입 체크는 통과하며, 키가 없으면 함수가 `failed-precondition` 에러를 던지고
+`src/lib/translate.ts`의 `translateFromKorean()`이 이를 `TranslationNotConfiguredError`로 구분해줍니다
+(호출부는 이걸 잡아서 수동 입력으로 폴백하면 됩니다).
+
+담당자가 DeepL API 키를 발급받으면:
+
+```bash
+cd functions && npm install
+firebase functions:secrets:set DEEPL_API_KEY   # 발급받은 키 입력
+firebase deploy --only functions
+```
+
+이후 클라이언트에서 `translateFromKorean({ name: '핑크 알로하', description: '...' })`를 호출하면
+en/ja/zh/fr/es 초안이 돌아옵니다. 브라우저에는 API 키가 절대 노출되지 않습니다(함수는 로그인한
+사장님 계정에서만 호출 가능).
+
 ## 코드 구조
 
 ```

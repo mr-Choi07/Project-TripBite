@@ -2,27 +2,36 @@ import { useNavigate } from 'react-router-dom'
 import { MapPin, Clock, Sun, Cloud, CloudRain, Users, UtensilsCrossed, Route as RouteIcon, ChevronRight } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import AppShell from '../components/layout/AppShell'
-import { SUNRISE_BOWL } from '../data/place'
 import { pickLocalized } from '../i18n'
 import { LANG_LABEL } from '../i18n'
 
 const WEATHER_ICON = { sunny: Sun, cloudy: Cloud, rainy: CloudRain }
 
 export default function PlaceLandingScreen() {
-  const { t, lang, weather } = useApp()
+  const { t, lang, weather, store, storeLoading } = useApp()
   const navigate = useNavigate()
   const WeatherIcon = WEATHER_ICON[weather.condition]
   const weatherLabel = t(`weather${weather.condition.charAt(0).toUpperCase()}${weather.condition.slice(1)}` as 'weatherSunny')
 
   const crowdLabel = { low: t('crowdLow'), medium: t('crowdMedium'), high: t('crowdHigh') }[weather.crowd]
 
+  if (storeLoading || !store) {
+    return (
+      <AppShell showBack={false}>
+        <div className="flex flex-col items-center gap-2 py-24 text-tb-ink-soft">
+          <p className="text-xs">불러오는 중...</p>
+        </div>
+      </AppShell>
+    )
+  }
+
   return (
     <AppShell showBack={false}>
       <div className="relative">
-        <img src={SUNRISE_BOWL.heroImage} alt="" className="h-52 w-full object-cover" />
+        <img src={store.heroImage} alt="" className="h-52 w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-tb-ink/70 via-tb-ink/10 to-transparent" />
         <img
-          src={SUNRISE_BOWL.logoImage}
+          src={store.logoImage}
           alt=""
           className="absolute right-4 top-4 h-12 w-12 rounded-full border-2 border-white/70 object-cover shadow-tb-float"
         />
@@ -30,10 +39,10 @@ export default function PlaceLandingScreen() {
           <span className="inline-block rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-semibold backdrop-blur">
             {t('qrEntryBadge')}
           </span>
-          <h1 className="mt-2 text-2xl font-black leading-tight">{pickLocalized(SUNRISE_BOWL.name, lang)}</h1>
+          <h1 className="mt-2 text-2xl font-black leading-tight">{pickLocalized(store.name, lang)}</h1>
           <p className="mt-0.5 flex items-center gap-1 text-xs text-white/85">
             <MapPin size={13} />
-            {pickLocalized(SUNRISE_BOWL.areaName, lang)}
+            {pickLocalized(store.areaName, lang)}
           </p>
         </div>
       </div>
@@ -67,10 +76,10 @@ export default function PlaceLandingScreen() {
 
         <div className="mt-4 flex items-center gap-3 rounded-xl border border-tb-line bg-tb-paper-raised px-4 py-3 text-xs text-tb-ink-soft">
           <Clock size={15} className="text-tb-teal-500" />
-          {SUNRISE_BOWL.hours}
+          {store.hours}
         </div>
 
-        <p className="mt-5 text-sm leading-relaxed text-tb-ink-soft">{pickLocalized(SUNRISE_BOWL.tagline, lang)}</p>
+        <p className="mt-5 text-sm leading-relaxed text-tb-ink-soft">{pickLocalized(store.tagline, lang)}</p>
 
         <div className="mt-5 space-y-3">
           <button

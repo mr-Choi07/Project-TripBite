@@ -5,13 +5,12 @@ import { useApp } from '../context/AppContext'
 import AppShell from '../components/layout/AppShell'
 import { pickLocalized } from '../i18n'
 import { parseMenuIntent, recommendMenu } from '../lib/recommendationEngine'
-import { MENU } from '../data/menu'
 import type { Allergen, MenuAdviceResult } from '../types'
 
 type Stage = 'input' | 'analyzing' | 'result'
 
 export default function AIRecommendScreen() {
-  const { t, lang, setLang } = useApp()
+  const { t, lang, setLang, menu } = useApp()
   const navigate = useNavigate()
 
   const [allergies, setAllergies] = useState<Set<Allergen>>(new Set())
@@ -60,7 +59,7 @@ export default function AIRecommendScreen() {
 
     setStage('analyzing')
     setTimeout(() => {
-      const advice = recommendMenu(MENU, {
+      const advice = recommendMenu(menu, {
         allergies: Array.from(mergedAllergies),
         vegan: vegan || Boolean(parsed.vegan),
         halal: halal || Boolean(parsed.halal),

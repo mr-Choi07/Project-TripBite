@@ -15,11 +15,28 @@ function eventsRef(storeId: string) {
   return collection(db, 'stores', storeId, 'events')
 }
 
+/** True while the current session is an owner previewing their *own* store's
+ * tourist screens (StatsScreen's "관광객 화면 보기") — reads localStorage
+ * directly rather than through AppContext since this module has no React
+ * context access. Without this, an owner clicking around their own menu/
+ * course screens would inflate their own store's stats identically to a
+ * real visitor. */
+function isPreviewSession(): boolean {
+  try {
+    const raw = localStorage.getItem('tripbite_session')
+    if (!raw) return false
+    return JSON.parse(raw)?.entryMethod === 'preview'
+  } catch {
+    return false
+  }
+}
+
 export async function trackEvent(
   storeId: string,
   type: EventType,
   payload?: { lang?: Lang; duration?: CourseDuration },
 ) {
+  if (isPreviewSession()) return
   try {
     await authReady
     await addDoc(eventsRef(storeId), {
@@ -39,7 +56,7 @@ const EMPTY_COUNTERS: AnalyticsCounters = {
   stampCompletions: 0,
   couponIssued: 0,
   couponUsed: 0,
-  languageCounts: { ko: 0, en: 0, ja: 0, zh: 0 },
+  languageCounts: { ko: 0, en: 0, ja: 0, zh: 0, fr: 0, es: 0 },
   coursePopularity: { 30: 0, 60: 0, 120: 0 },
 }
 

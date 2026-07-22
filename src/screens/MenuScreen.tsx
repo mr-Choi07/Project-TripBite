@@ -5,10 +5,9 @@ import { useApp } from '../context/AppContext'
 import AppShell from '../components/layout/AppShell'
 import MenuCard from '../components/menu/MenuCard'
 import CartSheet from '../components/menu/CartSheet'
-import { MENU } from '../data/menu'
 
 export default function MenuScreen() {
-  const { t, cart, addToCart, cartCount, cartTotal } = useApp()
+  const { t, menu, cart, addToCart, cartCount, cartTotal } = useApp()
   const navigate = useNavigate()
   const [cartOpen, setCartOpen] = useState(false)
 
@@ -34,7 +33,7 @@ export default function MenuScreen() {
         </button>
 
         <div className="mt-4 space-y-3 pb-4">
-          {MENU.map((item) => (
+          {menu.map((item) => (
             <MenuCard key={item.id} item={item} inCart={cartIds.has(item.id)} onAdd={() => addToCart(item)} />
           ))}
         </div>
